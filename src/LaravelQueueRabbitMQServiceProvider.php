@@ -4,6 +4,7 @@ namespace VladimirYuldashev\LaravelQueueRabbitMQ;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Queue\QueueManager;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\ServiceProvider;
 use VladimirYuldashev\LaravelQueueRabbitMQ\Console\ConsumeCommand;
 use VladimirYuldashev\LaravelQueueRabbitMQ\Queue\Connectors\RabbitMQConnector;
@@ -21,16 +22,34 @@ class LaravelQueueRabbitMQServiceProvider extends ServiceProvider
         );
 
         if ($this->app->runningInConsole()) {
-            $this->app->singleton('rabbitmq.consumer', function () {
+            $this->app->singleton('rabbitmq.consumer', function ($app) {
                 $isDownForMaintenance = function () {
                     return $this->app->isDownForMaintenance();
+                };
+
+                $resetScope = function () use ($app) {
+                    if (method_exists($app['log']->driver(), 'withoutContext')) {
+                        $app['log']->withoutContext();
+                    }
+    
+                    if (method_exists($app['db'], 'getConnections')) {
+                        foreach ($app['db']->getConnections() as $connection) {
+                            $connection->resetTotalQueryDuration();
+                            $connection->allowQueryDurationHandlersToRunAgain();
+                        }
+                    }
+    
+                    $app->forgetScopedInstances();
+    
+                    return Facade::clearResolvedInstances();
                 };
 
                 return new Consumer(
                     $this->app['queue'],
                     $this->app['events'],
                     $this->app[ExceptionHandler::class],
-                    $isDownForMaintenance
+                    $isDownForMaintenance,
+                    $resetScope
                 );
             });
 
